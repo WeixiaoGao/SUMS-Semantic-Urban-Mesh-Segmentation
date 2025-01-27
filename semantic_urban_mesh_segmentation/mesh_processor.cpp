@@ -1963,7 +1963,7 @@ namespace semantic_mesh_segmentation
 						{
 							fd_label_votes[cur_label] += 1;
 							easy3d::vec3 tex_label_color = 255.0f * labels_color[cur_label];
-							texture_mask_maps_full[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_maps_pred[texture_id].rows - 1, newcoord[0] * texture_mask_maps_pred[texture_id].cols) =
+							texture_mask_maps_full[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_maps_full[texture_id].rows - 1, newcoord[0] * texture_mask_maps_full[texture_id].cols) =
 								cv::Vec3b(int(tex_label_color.z), int(tex_label_color.y), int(tex_label_color.x));
 						}
 						else
@@ -1971,7 +1971,7 @@ namespace semantic_mesh_segmentation
 							easy3d::vec3 tex_label_color = 255.0f * tex_labels_color[cur_label - labels_color.size()];
 							texture_mask_maps_pred[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_maps_pred[texture_id].rows - 1, newcoord[0] * texture_mask_maps_pred[texture_id].cols) =
 								cv::Vec3b(int(tex_label_color.z), int(tex_label_color.y), int(tex_label_color.x));
-							texture_mask_maps_full[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_maps_pred[texture_id].rows - 1, newcoord[0] * texture_mask_maps_pred[texture_id].cols) =
+							texture_mask_maps_full[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_maps_full[texture_id].rows - 1, newcoord[0] * texture_mask_maps_full[texture_id].cols) =
 								cv::Vec3b(int(tex_label_color.z), int(tex_label_color.y), int(tex_label_color.x));
 							fd_label_votes[tex_fd_label[cur_label - labels_color.size()]] += 1;
 						}
@@ -2295,6 +2295,215 @@ namespace semantic_mesh_segmentation
 		delete smesh_test;
 	}
 
+
+	void collect_ablation_semantic_labels
+	(
+		std::vector<int>& face_truth_label,
+		std::vector<int>& face_test_label,
+		std::vector<float>& face_area_weighted,
+		const int mi
+	)
+	{
+		//read original mesh
+		SFMesh* smesh_train = new SFMesh;
+		read_mesh_data(smesh_train, mi);
+
+		SFMesh* smesh_test = new SFMesh;
+		read_test_mesh_data(smesh_test, mi);
+
+		for (auto fd : smesh_test->faces())
+		{
+			if (smesh_test->get_face_truth_label[fd] > 0)
+			{
+				if (!ignored_labels_name.empty())
+				{
+					if (!label_ignore[smesh_test->get_face_truth_label[fd] - 1])
+					{
+						int new_pred_label = smesh_test->get_face_truth_label[fd] - 1 - label_shiftdis[smesh_test->get_face_truth_label[fd] - 1];
+						int new_truth_label = smesh_train->get_face_truth_label[fd] - 1 - label_shiftdis[smesh_train->get_face_truth_label[fd] - 1];
+
+						face_truth_label.push_back(new_truth_label);
+						face_test_label.push_back(new_pred_label);
+						face_area_weighted.push_back(FaceArea(smesh_train, fd));
+					}
+				}
+				else
+				{
+					face_truth_label.push_back(smesh_train->get_face_truth_label[fd] - 1);
+					face_test_label.push_back(smesh_test->get_face_truth_label[fd] - 1);
+					face_area_weighted.push_back(FaceArea(smesh_train, fd));
+				}
+			}
+		}
+
+		//output error map
+		if (save_error_map)
+			error_map(smesh_test, mi);
+
+		delete smesh_train;
+		delete smesh_test;
+	}
+
+
+	void collect_ablation_semantic_labels_with_texture_mask
+	(
+		std::vector<int>& pix_truth_label,
+		std::vector<int>& pix_test_label,
+		const int mi
+	)
+	{
+		SFMesh* smesh_train = new SFMesh;
+		read_test_mesh_data(smesh_train, mi);
+
+		SFMesh* smesh_test = new SFMesh;
+		read_test_mesh_data(smesh_test, mi);
+
+		std::vector<cv::Mat> gt_texture_mask_maps, pred_texture_mask_maps;
+		read_mesh_texture_masks(smesh_train, gt_texture_mask_maps, mi);
+		read_mesh_texture_masks(smesh_test, pred_texture_mask_maps, mi, true);
+
+		// initialize texture mask
+		std::vector<cv::Mat> texture_mask_error_map;
+		if (save_error_map)
+		{
+			for (int ti = 0; ti < pred_texture_mask_maps.size(); ++ti)
+			{
+				cv::Mat ti_mask = cv::Mat::zeros(pred_texture_mask_maps[ti].rows, pred_texture_mask_maps[ti].cols, pred_texture_mask_maps[ti].type());
+				ti_mask.setTo(cv::Scalar(0, 255, 0));
+				texture_mask_error_map.push_back(ti_mask);
+			}
+		}
+
+		// paring labels
+		for (auto& fd : smesh_test->faces())
+		{
+			if (smesh_train->get_face_truth_label[fd] - 1 >= 0)
+			{
+				smesh_test->get_face_property<easy3d::vec3>("f:color")[fd] = easy3d::vec3();
+				int texture_id = smesh_test->get_face_texnumber[fd];
+				int width = gt_texture_mask_maps[texture_id].cols;
+				int height = gt_texture_mask_maps[texture_id].rows;
+
+				std::vector<easy3d::vec2> uv_triangle;
+				std::vector<double> U_vec, V_vec, UL_vec, VL_vec;
+				std::vector<easy3d::vec3> coord3d_triangle;
+				for (auto& vd : smesh_test->vertices(fd))
+					coord3d_triangle.push_back(smesh_test->get_points_coord[vd]);
+
+				U_vec.push_back(smesh_test->get_face_texcoord[fd][0]);
+				U_vec.push_back(smesh_test->get_face_texcoord[fd][2]);
+				U_vec.push_back(smesh_test->get_face_texcoord[fd][4]);
+				V_vec.push_back(smesh_test->get_face_texcoord[fd][1]);
+				V_vec.push_back(smesh_test->get_face_texcoord[fd][3]);
+				V_vec.push_back(smesh_test->get_face_texcoord[fd][5]);
+
+				uv_triangle.emplace_back(U_vec[0], V_vec[0]);
+				uv_triangle.emplace_back(U_vec[1], V_vec[1]);
+				uv_triangle.emplace_back(U_vec[2], V_vec[2]);
+
+				UL_vec.insert(UL_vec.end(), U_vec.begin(), U_vec.end());
+				VL_vec.insert(VL_vec.end(), V_vec.begin(), V_vec.end());
+
+				std::pair<int, int> uv_dis;
+				std::pair<double, double> uv_min;
+				enlarge_uv_triangle(UL_vec, VL_vec, uv_dis, uv_min, width, height);
+
+				for (int u_i = 0; u_i < uv_dis.first; ++u_i)
+				{
+					for (int v_i = 0; v_i < uv_dis.second; ++v_i)
+					{
+						std::vector<double> P =
+						{
+							uv_min.first + double(u_i) / double(width),
+							uv_min.second + double(v_i) / double(height)
+						};
+
+						if (P[0] > 1.0f || P[0] < 0.0f || P[1] > 1.0f || P[1] < 0.0f)
+						{
+							P.clear();
+							continue;
+						}
+
+						if (PointinTriangle(UL_vec, VL_vec, P))
+						{
+							easy3d::vec2 newcoord(P[0], P[1]);
+							easy3d::vec3 current_3d;
+
+							uv_to_3D_coordinates(uv_triangle, coord3d_triangle, newcoord, current_3d);
+
+							if (std::isnan(current_3d.x) || std::isnan(current_3d.y) || std::isnan(current_3d.z))
+								continue;
+
+							float Rf = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[2];
+							float Gf = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[1];
+							float Bf = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[0];
+
+							bool label_equal = false, has_gt_tex_label = false, has_pred_tex_label = false;
+							int gt_pix_label = smesh_train->get_face_truth_label[fd] - 1 - ignored_labels_name.size(); //remove: 0: unclassified; 1: terrian
+							int pred_pix_label = smesh_test->get_face_truth_label[fd] - 1 - ignored_labels_name.size();
+
+							float gt_Rf_mask = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[2];
+							float gt_Gf_mask = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[1];
+							float gt_Bf_mask = (float)gt_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * gt_texture_mask_maps[texture_id].rows - 1, newcoord[0] * gt_texture_mask_maps[texture_id].cols)[0];
+							float pred_Rf_mask = (float)pred_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * pred_texture_mask_maps[texture_id].rows - 1, newcoord[0] * pred_texture_mask_maps[texture_id].cols)[2];
+							float pred_Gf_mask = (float)pred_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * pred_texture_mask_maps[texture_id].rows - 1, newcoord[0] * pred_texture_mask_maps[texture_id].cols)[1];
+							float pred_Bf_mask = (float)pred_texture_mask_maps[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * pred_texture_mask_maps[texture_id].rows - 1, newcoord[0] * pred_texture_mask_maps[texture_id].cols)[0];
+
+							for (int tex_ci = 0; tex_ci < tex_labels_color.size(); ++tex_ci)
+							{
+								if (std::abs(gt_Rf_mask - 255.0f * tex_labels_color[tex_ci][0]) <= 1.0f &&
+									std::abs(gt_Gf_mask - 255.0f * tex_labels_color[tex_ci][1]) <= 1.0f &&
+									std::abs(gt_Bf_mask - 255.0f * tex_labels_color[tex_ci][2]) <= 1.0f)
+								{
+									gt_pix_label = labels_color.size() + tex_ci;
+									has_gt_tex_label = true;
+								}
+							}
+
+							for (int tex_ci = 0; tex_ci < tex_labels_color.size(); ++tex_ci)
+							{
+								if (std::abs(pred_Rf_mask - 255.0f * tex_labels_color[tex_ci][0]) <= 1.0f &&
+									std::abs(pred_Gf_mask - 255.0f * tex_labels_color[tex_ci][1]) <= 1.0f &&
+									std::abs(pred_Bf_mask - 255.0f * tex_labels_color[tex_ci][2]) <= 1.0f)
+								{
+									pred_pix_label = labels_color.size() + tex_ci;
+									has_pred_tex_label = true;
+								}
+							}
+
+							if (has_pred_tex_label)
+							{
+								pix_truth_label.push_back(gt_pix_label);
+								pix_test_label.push_back(pred_pix_label);
+
+								if (gt_pix_label == pred_pix_label)
+									label_equal = true;
+							}
+							//else
+							//{
+							//	pix_truth_label.push_back(gt_pix_label);
+							//	pix_test_label.push_back(pred_pix_label);
+
+							//	if (gt_pix_label == pred_pix_label)
+							//		label_equal = true;
+							//}
+
+							if (!label_equal && save_error_map)
+								texture_mask_error_map[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_error_map[texture_id].rows - 1, newcoord[0] * texture_mask_error_map[texture_id].cols) =
+								cv::Vec3b(int(0), int(0), int(255));
+						}
+					}
+				}
+			}
+		}
+
+		if (save_error_map)
+			write_error_mesh_texture_masks(smesh_test, texture_mask_error_map, mi);
+
+		delete smesh_train;
+		delete smesh_test;
+	}
+
 	void collect_semantic_labels_with_texture_mask
 	(
 		std::vector<int>& pix_truth_label,
@@ -2435,7 +2644,7 @@ namespace semantic_mesh_segmentation
 									label_equal = true;
 							}
 
-							if (!label_equal)
+							if (!label_equal && save_error_map)
 								texture_mask_error_map[texture_id].at<cv::Vec3b>((1 - newcoord[1]) * texture_mask_error_map[texture_id].rows - 1, newcoord[0] * texture_mask_error_map[texture_id].cols) =
 								cv::Vec3b(int(0), int(0), int(255));
 						}

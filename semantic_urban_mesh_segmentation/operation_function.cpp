@@ -1543,6 +1543,58 @@ namespace semantic_mesh_segmentation
 			break;
 		}
 
+		case operating_mode::Ablation_evaluation_on_mesh:
+		{
+			current_mode = operating_mode::Ablation_evaluation_on_mesh;
+
+			//train
+			train_test_predict_val = 0;
+			get_training_data();
+			data_path = training_data_path;
+			base_names = training_base_names;
+			ply_files = training_ply_files;
+			file_folders = training_file_folders;
+			file_ind_map = training_file_ind_map;
+			use_batch_processing = use_batch_processing_on_training;
+
+			std::cout << "--------------------- on training data ---------------------" << std::endl;
+			//add labels
+			Label_set labels;
+			add_labels(labels);
+
+			//add test data 
+			std::vector<int> num_truth_label, num_test_label;
+			std::vector<float> face_area_weighted;
+			if (!ignored_labels_name.empty() && !with_texture_mask)
+				check_ignored_truth_labels();
+
+			for (std::size_t mi = 0; mi < base_names.size(); ++mi)
+			{
+				if (with_texture_mask)
+					collect_ablation_semantic_labels_with_texture_mask(num_truth_label, num_test_label, mi);
+				else
+					collect_ablation_semantic_labels(num_truth_label, num_test_label, face_area_weighted, mi);
+			}
+
+			if (with_texture_mask)
+				evaluation_all_test_data
+				(
+					labels,
+					num_truth_label,
+					num_test_label
+				);
+			else
+				evaluation_all_test_data
+				(
+					labels,
+					num_truth_label,
+					num_test_label,
+					face_area_weighted
+				);
+
+			break;
+		}
+
 		default:
 		{
 			std::cerr << std::endl << "No operation model has been chosen!!!" << std::endl;

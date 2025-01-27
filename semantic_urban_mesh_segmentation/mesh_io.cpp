@@ -674,6 +674,9 @@ namespace semantic_mesh_segmentation
 						std::cout << "	Reading SOTA test masks : " << base_names[mi] << std::endl;
 						std::string basic_write_path = root_path + folder_names_level_0[8] + sota_folder_path + folder_names_level_0[4] + folder_names_level_1[train_test_predict_val];
 						mask_path_tmp = basic_write_path + "pred_mask_" + texture_name_splits[0] + ".png";
+
+						//for ablation texture
+						//mask_path_tmp = root_path + folder_names_level_0[4] + folder_names_level_1[train_test_predict_val] + "mask_" + texture_name_splits[0] + ".png";;
 					}
 					else
 					{
@@ -808,8 +811,7 @@ namespace semantic_mesh_segmentation
 
 		std::ostringstream batch_out;
 		batch_out
-			<< path
-			<< "config.txt";
+			<< path;
 
 		std::string str_temp = batch_out.str().data();
 		std::ifstream fin;
@@ -923,6 +925,10 @@ namespace semantic_mesh_segmentation
 							else if (param_value == "Data_evaluation_for_all_tiles_config_v2")
 							{
 								current_mode = operating_mode::Data_evaluation_for_all_tiles_config_v2;
+							}
+							else if (param_value == "Ablation_evaluation_on_mesh")
+							{
+								current_mode = operating_mode::Ablation_evaluation_on_mesh;
 							}
 						}
 					}

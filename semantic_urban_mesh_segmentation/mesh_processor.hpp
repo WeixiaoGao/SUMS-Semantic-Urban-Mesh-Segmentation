@@ -338,6 +338,21 @@ namespace semantic_mesh_segmentation
 		const int 
 	);
 
+	void collect_ablation_semantic_labels
+	(
+		std::vector<int>&,
+		std::vector<int>&,
+		std::vector<float>&,
+		const int
+	);
+
+	void collect_ablation_semantic_labels_with_texture_mask
+	(
+		std::vector<int>&,
+		std::vector<int>&,
+		const int
+	);
+
 	void compute_feature_diversity
 	(
 		std::vector<float> &

@@ -66,7 +66,8 @@ namespace semantic_mesh_segmentation
 		Evaluation_SOTA_v2,
 		Process_semantic_pcl_v2,
 		Data_evaluation_for_all_tiles_config_v2,
-		Data_evaluation_for_all_tiles_v2
+		Data_evaluation_for_all_tiles_v2,
+		Ablation_evaluation_on_mesh
 	};
 
 	//--- global variables for point cloud sampling ---
